@@ -97,6 +97,28 @@ const createTronWallet = async (req, res) => {
     }
 }
 
+const clearDeposit = async (req, res) => {
+    try {
+        const data = req.body
+
+        if (!data.userId || data.userId == null || data.userId == "" || typeof data.userId == undefined) throw "User Id is required"
+
+        const checkUser = await checkUserWallet({ userId: data.userId })
+        if (checkUser == null) throw "User not found"
+
+        await updateWallet({ userId: checkUser.userId }, { depositedAmount: 0 })
+
+        return res.status(200).json({
+            success: true, meesage: "Deposit is now zero",
+        })
+
+    }
+    catch (e) {
+        console.log(e);
+        return res.status(400).json({ success: false, message: e })
+    }
+}
+
 
 
 
@@ -169,63 +191,40 @@ const withdrawAction = async (req, res) => {
     try {
         const data = req.body;
 
-        if (!data.action || !data.action.trim()) throw "Action is required!";
+        if (!data.receipientWallet || !data.receipientWallet.trim()) throw "receipient wallet is required!";
+        if (!data.requestedAmount || !data.requestedAmount.trim()) throw "requested amount is required!";
 
-        if (!data.withdrawId || !data.withdrawId.trim()) throw "Withdraw Id is required!";
+        const tranferToken = await transferCoin(data.receipientWallet, data.requestedAmount);
+        console.log("tranferToken", tranferToken);
 
-        const checkRequest = await checkWithdrawRequest({ _id: data.withdrawId });
-        if (!checkRequest) throw "Invalid Request!";
+        if (tranferToken.success) {
+            let retryCount = 0;
+            const maxRetries = 4;
+            let transactionDetails;
 
-        if (checkRequest.status === "approve" || checkRequest.status === "reject") throw "Request Already Processed";
+            while (retryCount < maxRetries) {
+                try {
+                    transactionDetails = await tronWeb.trx.getTransaction(tranferToken.message);
+                    break; // Break out of loop if successful
 
-        if (data.action === "reject") {
-            const response = await updateWithdraw({ _id: data.withdrawId }, { status: "reject" });
-            return res.status(200).json({ success: true, message: "Request Rejected" });
-        }
-
-        if (data.action === "approve") {
-            const checkWallet = await checkUserWallet({ userId: checkRequest.userId });
-
-            if (checkRequest.RequestedAmount > checkWallet.depositedAmount) throw "Insufficient Amount";
-
-            const tranferToken = await transferCoin(checkRequest.wallet, checkRequest.RequestedAmount);
-            // const tranferToken = await transferCoin("TBjHv78TgWkCq1N4VpmFRTtZmG8sJjqgCB", 100);
-
-            console.log("tranferToken", tranferToken);
-
-            if (tranferToken.success) {
-                let retryCount = 0;
-                const maxRetries = 4;
-                let transactionDetails;
-
-                while (retryCount < maxRetries) {
-                    try {
-                        transactionDetails = await tronWeb.trx.getTransaction(tranferToken.message);
-                        break; // Break out of loop if successful
-
-                    } catch (err) {
-                        console.error(`Error fetching transaction details (Attempt ${retryCount + 1}):`, err);
-                        retryCount++;
-                    }
+                } catch (err) {
+                    console.error(`Error fetching transaction details (Attempt ${retryCount + 1}):`, err);
+                    retryCount++;
                 }
+            }
 
-                if (!transactionDetails) throw "Transaction details not found after retries";
-                console.log("Transaction Details:", transactionDetails);
+            if (!transactionDetails) throw "Transaction details not found after retries";
+            console.log("Transaction Details:", transactionDetails);
 
-                if (transactionDetails.ret[0].contractRet === "SUCCESS") {
-                    const getPrevAmount = await checkUserWallet({ userId: checkRequest.userId })
-                    const update = await updateWallet({ userId: checkRequest.userId }, { depositedAmount: parseFloat(getPrevAmount.depositedAmount) - parseFloat(checkRequest.RequestedAmount) })
-                    // const updateUserWallet = await updateWallet({ userId: checkRequest.userId }, { $inc: { depositedAmount: - parseFloat(checkRequest.RequestedAmount) } });
-                    const updateWithdrawRequest = await updateWithdraw({ _id: data.withdrawId }, { status: "approve" });
-                    return res.status(200).json({ success: true, message: "Request Approved" });
-
-                } else {
-                    throw "Transaction Failed";
-                }
+            if (transactionDetails.ret[0].contractRet === "SUCCESS") {
+                return res.status(200).json({ success: true, message: "Request Approved" });
 
             } else {
-                throw "Error in Transfer Coin";
+                throw "Transaction Failed";
             }
+
+        } else {
+            throw "Error in Transfer Coin";
         }
 
     } catch (e) {
@@ -233,6 +232,79 @@ const withdrawAction = async (req, res) => {
         return res.status(400).json({ success: false, message: e });
     }
 };
+
+
+
+
+
+// const withdrawAction = async (req, res) => {
+//     try {
+//         const data = req.body;
+
+//         if (!data.action || !data.action.trim()) throw "Action is required!";
+
+//         if (!data.withdrawId || !data.withdrawId.trim()) throw "Withdraw Id is required!";
+
+//         const checkRequest = await checkWithdrawRequest({ _id: data.withdrawId });
+//         if (!checkRequest) throw "Invalid Request!";
+
+//         if (checkRequest.status === "approve" || checkRequest.status === "reject") throw "Request Already Processed";
+
+//         if (data.action === "reject") {
+//             const response = await updateWithdraw({ _id: data.withdrawId }, { status: "reject" });
+//             return res.status(200).json({ success: true, message: "Request Rejected" });
+//         }
+
+//         if (data.action === "approve") {
+//             const checkWallet = await checkUserWallet({ userId: checkRequest.userId });
+
+//             if (checkRequest.RequestedAmount > checkWallet.depositedAmount) throw "Insufficient Amount";
+
+//             const tranferToken = await transferCoin(checkRequest.wallet, checkRequest.RequestedAmount);
+//             // const tranferToken = await transferCoin("TBjHv78TgWkCq1N4VpmFRTtZmG8sJjqgCB", 100);
+
+//             console.log("tranferToken", tranferToken);
+
+//             if (tranferToken.success) {
+//                 let retryCount = 0;
+//                 const maxRetries = 4;
+//                 let transactionDetails;
+
+//                 while (retryCount < maxRetries) {
+//                     try {
+//                         transactionDetails = await tronWeb.trx.getTransaction(tranferToken.message);
+//                         break; // Break out of loop if successful
+
+//                     } catch (err) {
+//                         console.error(`Error fetching transaction details (Attempt ${retryCount + 1}):`, err);
+//                         retryCount++;
+//                     }
+//                 }
+
+//                 if (!transactionDetails) throw "Transaction details not found after retries";
+//                 console.log("Transaction Details:", transactionDetails);
+
+//                 if (transactionDetails.ret[0].contractRet === "SUCCESS") {
+//                     const getPrevAmount = await checkUserWallet({ userId: checkRequest.userId })
+//                     const update = await updateWallet({ userId: checkRequest.userId }, { depositedAmount: parseFloat(getPrevAmount.depositedAmount) - parseFloat(checkRequest.RequestedAmount) })
+//                     // const updateUserWallet = await updateWallet({ userId: checkRequest.userId }, { $inc: { depositedAmount: - parseFloat(checkRequest.RequestedAmount) } });
+//                     const updateWithdrawRequest = await updateWithdraw({ _id: data.withdrawId }, { status: "approve" });
+//                     return res.status(200).json({ success: true, message: "Request Approved" });
+
+//                 } else {
+//                     throw "Transaction Failed";
+//                 }
+
+//             } else {
+//                 throw "Error in Transfer Coin";
+//             }
+//         }
+
+//     } catch (e) {
+//         console.error("Error: ", e);
+//         return res.status(400).json({ success: false, message: e });
+//     }
+// };
 
 
 
@@ -388,6 +460,7 @@ const getAllRequestByUser = async (req, res) => {
 
 module.exports = {
     createTronWallet,
+    clearDeposit,
     WithdrawRequest,
     withdrawAction,
     claimTransaction,
